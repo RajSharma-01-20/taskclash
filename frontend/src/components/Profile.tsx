@@ -66,29 +66,27 @@ export default function Profile() {
     }
 
     return (
-        <div className="profile-container">
-            <h1>PROFILE</h1>
+        <div className="flex flex-col items-center justify-center py-12 px-6">
+            <h1 className="text-[5rem] md:text-[8rem] font-black text-[#F14A3B] tracking-tighter uppercase leading-none transform scale-y-110 mb-10 text-center">
+                PROFILE
+            </h1>
             
-            <div className="profile-card" style={{ marginTop: '20px', fontSize: '1.2rem', lineHeight: '2' }}>
-                <p><strong>USERNAME:</strong> {user.username}</p>
-                <p><strong>EMAIL:</strong> {user.email}</p>
-            </div>
+            <div className="max-w-md w-full bg-white rounded-[2.5rem] p-10 shadow-2xl text-center space-y-6">
+                <div className="w-24 h-24 bg-[#F14A3B] text-white rounded-3xl mx-auto flex items-center justify-center text-4xl font-black shadow-lg shadow-[#F14A3B]/30 transform rotate-3">
+                    {user.username.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                    <h2 className="text-3xl font-black text-stone-800">{user.username}</h2>
+                    <p className="text-stone-400 font-bold text-sm">{user.email}</p>
+                </div>
 
-            <button 
-                onClick={handleLogout} 
-                style={{ 
-                    marginTop: '30px', 
-                    backgroundColor: '#f44336', 
-                    color: 'white', 
-                    padding: '10px 20px', 
-                    border: 'none', 
-                    borderRadius: '5px', 
-                    cursor: 'pointer', 
-                    fontWeight: 'bold' 
-                }}
-            >
-                LOGOUT
-            </button>
+                <button 
+                    onClick={handleLogout} 
+                    className="w-full bg-red-100 text-[#F14A3B] font-black uppercase tracking-widest py-4 rounded-2xl hover:bg-red-200 transition-colors mt-8"
+                >
+                    Sign Out
+                </button>
+            </div>
         </div>
     );
 }
