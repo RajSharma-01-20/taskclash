@@ -117,7 +117,7 @@ async def submit_proof(clash_id: int, file: UploadFile = File(...), db: Session 
     with open(file_path, "wb+") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
-    media_url = f"http://localhost:8000/uploads/{unique_filename}"
+    media_url = f"https://taskclash-api.onrender.com/uploads/{unique_filename}"
         
     if current_user.id == clash.challenger_id:
         clash.challenger_proof = media_url

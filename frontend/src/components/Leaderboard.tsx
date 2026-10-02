@@ -11,7 +11,7 @@ export default function Leaderboard() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/leaderboard/')
+    fetch('https://taskclash-api.onrender.com/api/leaderboard/')
       .then(res => res.json())
       .then(data => setPlayers(data))
       .catch(() => setError('Failed to load leaderboard'));

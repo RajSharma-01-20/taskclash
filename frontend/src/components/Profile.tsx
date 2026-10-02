@@ -16,7 +16,7 @@ export default function Profile() {
     const token = localStorage.getItem('token');
     if (!token) { navigate('/login'); return; }
 
-    fetch('http://localhost:8000/api/users/me', { headers: { 'Authorization': `Bearer ${token}` } })
+    fetch('https://taskclash-api.onrender.com/api/users/me', { headers: { 'Authorization': `Bearer ${token}` } })
       .then(res => res.ok ? res.json() : Promise.reject())
       .then(data => setUser(data))
       .catch(() => { localStorage.removeItem('token'); navigate('/login'); });

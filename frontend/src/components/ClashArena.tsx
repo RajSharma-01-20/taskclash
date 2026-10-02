@@ -40,13 +40,13 @@ export default function ClashArena() {
     const token = localStorage.getItem('token');
     if (!token) { setError('Log in to access the Arena.'); return; }
     try {
-      const userRes = await fetch('http://localhost:8000/api/users/me', { headers: { 'Authorization': `Bearer ${token}` } });
+      const userRes = await fetch('https://taskclash-api.onrender.com/api/users/me', { headers: { 'Authorization': `Bearer ${token}` } });
       if (userRes.ok) { setCurrentUserId((await userRes.json()).id); }
       if (tab === 'public') {
-        const res = await fetch('http://localhost:8000/api/clashes/public', { headers: { 'Authorization': `Bearer ${token}` } });
+        const res = await fetch('https://taskclash-api.onrender.com/api/clashes/public', { headers: { 'Authorization': `Bearer ${token}` } });
         if (res.ok) setPublicClashes(await res.json());
       } else {
-        const res = await fetch('http://localhost:8000/api/clashes/', { headers: { 'Authorization': `Bearer ${token}` } });
+        const res = await fetch('https://taskclash-api.onrender.com/api/clashes/', { headers: { 'Authorization': `Bearer ${token}` } });
         if (res.ok) setMyClashes(await res.json());
       }
     } catch (err) { setError('Failed to sync arena data.'); }
@@ -57,7 +57,7 @@ export default function ClashArena() {
     const token = localStorage.getItem('token');
     try {
       const formattedDeadline = new Date(newClash.deadline).toISOString();
-      const res = await fetch('http://localhost:8000/api/clashes/', {
+      const res = await fetch('https://taskclash-api.onrender.com/api/clashes/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ ...newClash, deadline: formattedDeadline })
@@ -75,7 +75,7 @@ export default function ClashArena() {
   const handleAcceptClash = async (id: number) => {
     const token = localStorage.getItem('token');
     try {
-      const res = await fetch(`http://localhost:8000/api/clashes/${id}/accept`, {
+      const res = await fetch(`https://taskclash-api.onrender.com/api/clashes/${id}/accept`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ opponent_task: opponentTaskInput })
@@ -91,7 +91,7 @@ export default function ClashArena() {
     const formData = new FormData();
     formData.append('file', selectedFile);
     try {
-      const res = await fetch(`http://localhost:8000/api/clashes/${id}/proof`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: formData });
+      const res = await fetch(`https://taskclash-api.onrender.com/api/clashes/${id}/proof`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` }, body: formData });
       if (res.ok) { setProofFiles({ ...proofFiles, [id]: null }); fetchData(); setSuccess('Proof uploaded successfully!'); }
     } catch (err) { setError('Upload failed'); }
   };
@@ -99,7 +99,7 @@ export default function ClashArena() {
   const handleJudge = async (id: number, vote: 'approve' | 'reject') => {
     const token = localStorage.getItem('token');
     try {
-      const res = await fetch(`http://localhost:8000/api/clashes/${id}/judge`, {
+      const res = await fetch(`https://taskclash-api.onrender.com/api/clashes/${id}/judge`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ vote })
       });
       if (res.ok) { setSuccess(`You voted to ${vote}!`); fetchData(); }
