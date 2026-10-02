@@ -163,8 +163,8 @@ def submit_proof(
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
-    # Hosted URL (relative path, served by /uploads mount)
-    proof_url = f"/{file_path}"
+    # Full absolute URL so the Vercel frontend can load it from the Render backend
+    proof_url = f"https://taskclash-api.onrender.com/{file_path}"
 
     if clash.challenger_id == current_user.id:
         clash.challenger_proof = proof_url
