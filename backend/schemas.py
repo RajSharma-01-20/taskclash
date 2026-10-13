@@ -39,7 +39,11 @@ class ClashAccept(BaseModel):
     opponent_task: str
 
 class JudgeVote(BaseModel):
-    vote: str  # "approve" or "reject"
+    vote: str  # "approve", "reject", "challenger", "opponent", "tie"
+    outcome: Optional[str] = None
+
+class ResolveOutcome(BaseModel):
+    outcome: str  # "challenger" (User 1 wins), "opponent" (User 2 wins), "tie" (Both win)
 
 class ClashResponse(BaseModel):
     id: int
@@ -57,6 +61,12 @@ class ClashResponse(BaseModel):
     reward_stake: str
     deadline: datetime
     status: str
+    winner_id: Optional[int] = None
+    outcome: Optional[str] = None
+    challenger_reward: Optional[str] = None
+    opponent_reward: Optional[str] = None
+    challenger_username: Optional[str] = None
+    opponent_username: Optional[str] = None
 
     class Config:
         from_attributes = True

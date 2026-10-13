@@ -2,9 +2,12 @@ from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
+from sqlalchemy import inspect, text
 from typing import List
 import shutil
 import os
+import re
+import math
 
 import models
 import schemas
@@ -13,6 +16,27 @@ from database import engine, get_db
 
 # Create the database tables if they don't exist yet
 models.Base.metadata.create_all(bind=engine)
+
+# Ensure newly added columns exist in SQLite database if it already existed
+def ensure_sqlite_columns():
+    try:
+        inspector = inspect(engine)
+        if "clashes" in inspector.get_table_names():
+            columns = [c["name"] for c in inspector.get_columns("clashes")]
+            with engine.connect() as conn:
+                if "winner_id" not in columns:
+                    conn.execute(text("ALTER TABLE clashes ADD COLUMN winner_id INTEGER;"))
+                if "outcome" not in columns:
+                    conn.execute(text("ALTER TABLE clashes ADD COLUMN outcome VARCHAR;"))
+                if "challenger_reward" not in columns:
+                    conn.execute(text("ALTER TABLE clashes ADD COLUMN challenger_reward VARCHAR;"))
+                if "opponent_reward" not in columns:
+                    conn.execute(text("ALTER TABLE clashes ADD COLUMN opponent_reward VARCHAR;"))
+                conn.commit()
+    except Exception as e:
+        print(f"Database schema sync note: {e}")
+
+ensure_sqlite_columns()
 
 app = FastAPI()
 
@@ -163,8 +187,9 @@ def submit_proof(
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
-    # Full absolute URL so the Vercel frontend can load it from the Render backend
-    proof_url = f"https://taskclash-api.onrender.com/{file_path}"
+    # Full URL so the frontend can load it
+    backend_base = os.getenv("BACKEND_BASE_URL", "https://taskclash-api.onrender.com").rstrip("/")
+    proof_url = f"{backend_base}/{file_path}"
 
     if clash.challenger_id == current_user.id:
         clash.challenger_proof = proof_url
@@ -183,6 +208,111 @@ def submit_proof(
     db.refresh(clash)
     return clash
 
+# ---- REWARD ALLOCATION UTILITY ----
+
+def calculate_reward_allocation(reward_stake: str, outcome: str):
+    """
+    Allocates reward based on winner outcome:
+    - 'challenger' (User 1 wins): User 1 receives 100%, User 2 receives 0%
+    - 'opponent' (User 2 wins): User 2 receives 100%, User 1 receives 0%
+    - 'tie' (Both users win / tie): Split reward equally, 50% each
+    """
+    clean_stake = (reward_stake or "50 PTS").strip()
+    match = re.search(r'^([$€£¥]?)\s*([0-9]+(?:\.[0-9]+)?)\s*(.*?)$', clean_stake)
+    if match and match.group(2):
+        prefix = match.group(1) or ""
+        num_val = float(match.group(2)) if '.' in match.group(2) else int(match.group(2))
+        unit = match.group(3).strip()
+        unit_spaced = f" {unit}" if unit else ""
+        is_float = isinstance(num_val, float)
+        
+        def format_amount(val):
+            if is_float:
+                return f"{prefix}{val:.1f}{unit_spaced}".strip()
+            return f"{prefix}{int(val)}{unit_spaced}".strip()
+
+        base_pts = int(num_val) if ('pt' in unit.lower() or not unit) else max(50, int(num_val))
+        if base_pts <= 0:
+            base_pts = 50
+
+        if outcome == "challenger":
+            return f"{clean_stake} (100%)", f"{prefix}0{unit_spaced} (0%)".strip(), base_pts, 0
+        elif outcome == "opponent":
+            return f"{prefix}0{unit_spaced} (0%)".strip(), f"{clean_stake} (100%)", 0, base_pts
+        else:  # tie / both
+            half_1 = math.ceil(num_val / 2.0)
+            half_2 = math.floor(num_val / 2.0)
+            c_rew = f"{format_amount(half_1)} (50%)"
+            o_rew = f"{format_amount(half_2)} (50%)"
+            c_pts = math.ceil(base_pts / 2.0)
+            o_pts = math.floor(base_pts / 2.0)
+            return c_rew, o_rew, c_pts, o_pts
+    else:
+        # Non-numeric custom reward (e.g. "Pizza", "Coffee", "Bragging rights")
+        base_pts = 100
+        if outcome == "challenger":
+            return f"{clean_stake} (100%)", "None (0%)", base_pts, 0
+        elif outcome == "opponent":
+            return "None (0%)", f"{clean_stake} (100%)", 0, base_pts
+        else:
+            return f"Split {clean_stake} (50%)", f"Split {clean_stake} (50%)", 50, 50
+
+@app.post("/api/clashes/{clash_id}/resolve", response_model=schemas.ClashResponse)
+def resolve_clash(
+    clash_id: int,
+    body: schemas.ResolveOutcome,
+    current_user: models.User = Depends(security.get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Selects the winner and permanently distributes the reward:
+    - challenger: User 1 receives 100%, User 2 receives 0%
+    - opponent: User 2 receives 100%, User 1 receives 0%
+    - tie / both: Split equally, 50% each
+    """
+    clash = db.query(models.Clash).filter(models.Clash.id == clash_id).first()
+    if not clash:
+        raise HTTPException(status_code=404, detail="Clash not found")
+    if clash.status == "finished":
+        raise HTTPException(status_code=400, detail="Clash is already finished")
+    if current_user.id != clash.challenger_id and current_user.id != clash.opponent_id:
+        raise HTTPException(status_code=403, detail="Only duel participants can finalize the outcome")
+    if not clash.opponent_id:
+        raise HTTPException(status_code=400, detail="Cannot resolve a clash without an opponent")
+
+    norm_outcome = body.outcome.lower().strip()
+    if norm_outcome in ("user1", "challenger", "challenger_win"):
+        outcome_key = "challenger"
+        winner_id = clash.challenger_id
+    elif norm_outcome in ("user2", "opponent", "opponent_win"):
+        outcome_key = "opponent"
+        winner_id = clash.opponent_id
+    elif norm_outcome in ("tie", "both", "draw", "split"):
+        outcome_key = "tie"
+        winner_id = None
+    else:
+        raise HTTPException(status_code=400, detail="Outcome must be 'challenger', 'opponent', or 'tie'")
+
+    c_rew, o_rew, c_pts, o_pts = calculate_reward_allocation(clash.reward_stake, outcome_key)
+
+    clash.outcome = outcome_key
+    clash.winner_id = winner_id
+    clash.challenger_reward = c_rew
+    clash.opponent_reward = o_rew
+    clash.status = "finished"
+
+    # Credit points to user accounts
+    challenger = db.query(models.User).filter(models.User.id == clash.challenger_id).first()
+    opponent = db.query(models.User).filter(models.User.id == clash.opponent_id).first()
+    if challenger:
+        challenger.score = (challenger.score or 0) + c_pts
+    if opponent:
+        opponent.score = (opponent.score or 0) + o_pts
+
+    db.commit()
+    db.refresh(clash)
+    return clash
+
 @app.post("/api/clashes/{clash_id}/judge", response_model=schemas.ClashResponse)
 def judge_clash(
     clash_id: int,
@@ -190,35 +320,69 @@ def judge_clash(
     current_user: models.User = Depends(security.get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """Each player votes to approve or reject the OTHER player's proof."""
+    """
+    Judge endpoint supporting:
+    1. Direct winner outcome resolution ('challenger', 'opponent', 'tie')
+    2. Dual-vote consensus ('approve', 'reject')
+    """
     clash = db.query(models.Clash).filter(models.Clash.id == clash_id).first()
     if not clash:
         raise HTTPException(status_code=404, detail="Clash not found")
-    if clash.status != "review":
-        raise HTTPException(status_code=400, detail="Clash is not in review phase")
-    if body.vote not in ("approve", "reject"):
-        raise HTTPException(status_code=400, detail="Vote must be 'approve' or 'reject'")
+    if clash.status == "finished":
+        raise HTTPException(status_code=400, detail="Clash is already finished")
+    if current_user.id != clash.challenger_id and current_user.id != clash.opponent_id:
+        raise HTTPException(status_code=403, detail="You are not part of this clash")
+
+    vote_val = (body.outcome or body.vote or "").lower().strip()
+
+    # If direct winner outcome was specified
+    if vote_val in ("challenger", "opponent", "tie", "both", "user1", "user2"):
+        outcome_key = "challenger" if vote_val in ("challenger", "user1") else ("opponent" if vote_val in ("opponent", "user2") else "tie")
+        winner_id = clash.challenger_id if outcome_key == "challenger" else (clash.opponent_id if outcome_key == "opponent" else None)
+        c_rew, o_rew, c_pts, o_pts = calculate_reward_allocation(clash.reward_stake, outcome_key)
+        
+        clash.outcome = outcome_key
+        clash.winner_id = winner_id
+        clash.challenger_reward = c_rew
+        clash.opponent_reward = o_rew
+        clash.status = "finished"
+
+        challenger = db.query(models.User).filter(models.User.id == clash.challenger_id).first()
+        opponent = db.query(models.User).filter(models.User.id == clash.opponent_id).first()
+        if challenger:
+            challenger.score = (challenger.score or 0) + c_pts
+        if opponent:
+            opponent.score = (opponent.score or 0) + o_pts
+
+        db.commit()
+        db.refresh(clash)
+        return clash
+
+    if vote_val not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="Vote must be 'approve', 'reject', 'challenger', 'opponent', or 'tie'")
 
     if clash.challenger_id == current_user.id:
-        clash.challenger_vote = body.vote
+        clash.challenger_vote = vote_val
     elif clash.opponent_id == current_user.id:
-        clash.opponent_vote = body.vote
-    else:
-        raise HTTPException(status_code=403, detail="You are not part of this clash")
+        clash.opponent_vote = vote_val
 
     # Resolve when both have voted
     if clash.challenger_vote and clash.opponent_vote:
         if clash.challenger_vote == "approve" and clash.opponent_vote == "approve":
-            # Both approved — both win points
+            c_rew, o_rew, c_pts, o_pts = calculate_reward_allocation(clash.reward_stake, "tie")
+            clash.outcome = "tie"
+            clash.winner_id = None
+            clash.challenger_reward = c_rew
+            clash.opponent_reward = o_rew
+            clash.status = "finished"
+
             challenger = db.query(models.User).filter(models.User.id == clash.challenger_id).first()
             opponent = db.query(models.User).filter(models.User.id == clash.opponent_id).first()
             if challenger:
-                challenger.score += 50
+                challenger.score = (challenger.score or 0) + c_pts
             if opponent:
-                opponent.score += 50
-            clash.status = "finished"
+                opponent.score = (opponent.score or 0) + o_pts
         else:
-            # Disagreement — disputed
             clash.status = "disputed"
 
     db.commit()

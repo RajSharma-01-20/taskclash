@@ -39,5 +39,18 @@ class Clash(Base):
     deadline = Column(DateTime)
     status = Column(String, default="open")
 
+    winner_id = Column(Integer, nullable=True)
+    outcome = Column(String, nullable=True)
+    challenger_reward = Column(String, nullable=True)
+    opponent_reward = Column(String, nullable=True)
+
     challenger = relationship("User", foreign_keys=[challenger_id], back_populates="clashes_initiated")
     opponent = relationship("User", foreign_keys=[opponent_id], back_populates="clashes_received")
+
+    @property
+    def challenger_username(self):
+        return self.challenger.username if self.challenger else None
+
+    @property
+    def opponent_username(self):
+        return self.opponent.username if self.opponent else None
